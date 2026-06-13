@@ -13,7 +13,6 @@ public class LiferayDBMigratorMain {
 
         LiferayDBMigratorConfig config = null;
 
-        // 1. Obtener la configuración y capturar posibles errores de validación
         try {
             config = LiferayDBMigratorUtil.loadConfiguration(args);
         } catch (IllegalArgumentException e) {
@@ -23,7 +22,15 @@ public class LiferayDBMigratorMain {
             System.exit(1);
         }
 
-        // 2. Establecer conexiones usando directamente los getters del Record
+        try {
+            Class.forName("com.mysql.cj.jdbc.Driver");
+            Class.forName("org.postgresql.Driver");
+        } catch (ClassNotFoundException e) {
+            System.err.println("[ERROR CRITICO] No se encontraron los drivers JDBC en el classpath.");
+            e.printStackTrace();
+            System.exit(1);
+        }
+
         try (Connection myConn = DriverManager.getConnection(config.mysqlUrl(), config.mysqlUser(), config.mysqlPassword());
              Connection pgConn = DriverManager.getConnection(config.postgresUrl(), config.postgresUser(), config.postgresPassword())) {
 

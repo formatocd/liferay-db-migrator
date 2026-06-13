@@ -9,13 +9,9 @@ import java.util.Properties;
 
 public class LiferayDBMigratorUtil {
 
-    /**
-     * Carga y procesa la configuración según el algoritmo definido.
-     */
     public static LiferayDBMigratorConfig loadConfiguration(String[] args) {
         String configFilePath = null;
 
-        // 1. Comprobar si hay parámetro --config-file
         for (int i = 0; i < args.length; i++) {
             if (args[i].equals("--config-file") && i + 1 < args.length) {
                 configFilePath = args[i + 1];
@@ -23,7 +19,6 @@ public class LiferayDBMigratorUtil {
             }
         }
 
-        // 2. Cargar el objeto Properties SOLO si se ha indicado el fichero
         Properties props = new Properties();
         if (configFilePath != null) {
             try (FileInputStream fis = new FileInputStream(configFilePath)) {
@@ -34,7 +29,6 @@ public class LiferayDBMigratorUtil {
             }
         }
 
-        // 3. Extraer valores para mapearlos al Record
         String mysqlUrl = getValue(args, props, "--mysql.url", "mysql.url", null);
         String mysqlUser = getValue(args, props, "--mysql.user", "mysql.user", null);
         String mysqlPassword = getValue(args, props, "--mysql.password", "mysql.password", null);
@@ -45,23 +39,25 @@ public class LiferayDBMigratorUtil {
 
         int batchSize = Integer.parseInt(getValue(args, props, "--batch.size", "batchSize", "5000"));
 
-        // 4. Retornar la nueva instancia (si faltan datos, el Record lanzará IllegalArgumentException)
         return new LiferayDBMigratorConfig(mysqlUrl, mysqlUser, mysqlPassword, pgUrl, pgUser, pgPassword, batchSize);
     }
 
-    /**
-     * Orquesta el flujo completo de la migración de datos.
-     */
     public static void executeMigration(Connection myConn, Connection pgConn, int batchSize) throws SQLException {
         try {
+            List<String> mysqlTables = getTables(myConn);
+            List<String> pgTables = getPgTables(pgConn);
+
+            cloneMissingTables(myConn, pgConn, mysqlTables, pgTables);
+
             disableForeignKeys(pgConn);
 
-            List<String> tables = getTables(myConn);
-            System.out.println("[INFO] Se encontraron " + tables.size() + " tablas para migrar. Iniciando proceso...\n");
+            System.out.println("[INFO] Se encontraron " + mysqlTables.size() + " tablas para migrar. Iniciando proceso...\n");
 
-            for (String table : tables) {
-                if (truncateTable(pgConn, table)) {
-                    migrateTableData(myConn, pgConn, table, batchSize);
+            for (String table : mysqlTables) {
+                if (pgTables.contains(table.toLowerCase())) {
+                    if (truncateTable(pgConn, table)) {
+                        migrateTableData(myConn, pgConn, table, batchSize);
+                    }
                 }
             }
 
@@ -72,28 +68,15 @@ public class LiferayDBMigratorUtil {
         }
     }
 
-    // ====================================================================================
-    // MÉTODOS PRIVADOS (Ocultamos la complejidad interna)
-    // ====================================================================================
-
-    /**
-     * Método auxiliar para extraer el valor respetando la prioridad: CLI > Properties > Default
-     */
     private static String getValue(String[] args, Properties props, String cliKey, String propKey, String defaultValue) {
-        // Prioridad 1: Buscar en argumentos de consola
         for (String arg : args) {
             if (arg.startsWith(cliKey + "=")) {
                 return arg.substring(cliKey.length() + 1);
             }
         }
-        // Prioridad 2 y 3: Buscar en Properties o usar el valor por defecto
         return props.getProperty(propKey, defaultValue);
     }
 
-    /**
-     * Desactiva temporalmente la comprobación de claves foráneas y triggers en PostgreSQL
-     * para la sesión actual, permitiendo inserciones masivas sin errores de dependencia.
-     */
     private static void disableForeignKeys(Connection pgConn) throws SQLException {
         try (Statement stmt = pgConn.createStatement()) {
             stmt.execute("SET session_replication_role = 'replica';");
@@ -101,9 +84,6 @@ public class LiferayDBMigratorUtil {
         }
     }
 
-    /**
-     * Restaura la comprobación normal de claves foráneas en PostgreSQL.
-     */
     private static void enableForeignKeys(Connection pgConn) throws SQLException {
         try (Statement stmt = pgConn.createStatement()) {
             stmt.execute("SET session_replication_role = 'origin';");
@@ -111,9 +91,6 @@ public class LiferayDBMigratorUtil {
         }
     }
 
-    /**
-     * Obtiene la lista de todas las tablas presentes en la base de datos MySQL.
-     */
     private static List<String> getTables(Connection myConn) throws SQLException {
         List<String> tables = new ArrayList<>();
         DatabaseMetaData metaData = myConn.getMetaData();
@@ -125,25 +102,96 @@ public class LiferayDBMigratorUtil {
         return tables;
     }
 
-    /**
-     * Vacía una tabla en PostgreSQL de forma rápida y en cascada.
-     */
+    private static List<String> getPgTables(Connection pgConn) throws SQLException {
+        List<String> tables = new ArrayList<>();
+        DatabaseMetaData metaData = pgConn.getMetaData();
+        try (ResultSet rs = metaData.getTables(null, "public", "%", new String[]{"TABLE"})) {
+            while (rs.next()) {
+                tables.add(rs.getString("TABLE_NAME").toLowerCase());
+            }
+        }
+        return tables;
+    }
+
+    private static void cloneMissingTables(Connection myConn, Connection pgConn, List<String> mysqlTables, List<String> pgTables) {
+        System.out.println("[INFO] Verificando y clonando tablas faltantes en PostgreSQL...");
+        for (String table : mysqlTables) {
+            String pgTable = table.toLowerCase();
+            if (!pgTables.contains(pgTable)) {
+                System.out.println("  Clonando estructura: " + table + " -> " + pgTable + "...");
+                StringBuilder createStmt = new StringBuilder("CREATE TABLE ").append(pgTable).append(" (\n");
+                List<String> colDefs = new ArrayList<>();
+                List<String> pkCols = new ArrayList<>();
+
+                try (Statement stmt = myConn.createStatement();
+                     ResultSet rs = stmt.executeQuery("SHOW COLUMNS FROM " + table)) {
+                    while (rs.next()) {
+                        String colName = rs.getString("Field").toLowerCase();
+                        String colTypeRaw = rs.getString("Type").toLowerCase();
+                        String key = rs.getString("Key");
+
+                        String pgType = "text";
+                        if (colTypeRaw.contains("tinyint")) pgType = "boolean";
+                        else if (colTypeRaw.contains("bigint")) pgType = "bigint";
+                        else if (colTypeRaw.contains("int")) pgType = "integer";
+                        else if (colTypeRaw.contains("longtext") || colTypeRaw.contains("text")) pgType = "text";
+                        else if (colTypeRaw.contains("varchar")) pgType = colTypeRaw;
+                        else if (colTypeRaw.contains("datetime") || colTypeRaw.contains("timestamp")) pgType = "timestamp";
+                        else if (colTypeRaw.contains("double")) pgType = "double precision";
+                        else if (colTypeRaw.contains("float")) pgType = "real";
+                        else if (colTypeRaw.contains("blob")) pgType = "bytea";
+
+                        colDefs.add("    " + colName + " " + pgType);
+                        if ("PRI".equalsIgnoreCase(key)) {
+                            pkCols.add(colName);
+                        }
+                    }
+                } catch (SQLException e) {
+                    System.err.println("  [ERROR] No se pudo leer esquema de MySQL para " + table + ": " + e.getMessage());
+                    continue;
+                }
+
+                if (!pkCols.isEmpty()) {
+                    colDefs.add("    PRIMARY KEY (" + String.join(", ", pkCols) + ")");
+                }
+                createStmt.append(String.join(",\n", colDefs)).append("\n);");
+
+                try (Statement pgStmt = pgConn.createStatement()) {
+                    pgStmt.execute(createStmt.toString());
+                    pgConn.commit();
+                    pgTables.add(pgTable);
+                } catch (SQLException e) {
+                    System.err.println("  [ERROR] Fallo al crear la tabla " + pgTable + ": " + e.getMessage());
+                    try { pgConn.rollback(); } catch (SQLException ex) {}
+                }
+            }
+        }
+    }
+
     private static boolean truncateTable(Connection pgConn, String tableName) {
         String pgTable = tableName.toLowerCase();
         try (Statement pgStmt = pgConn.createStatement()) {
             pgStmt.execute("TRUNCATE TABLE " + pgTable + " CASCADE;");
+            pgConn.commit();
             return true;
         } catch (SQLException e) {
             System.out.println("[WARN] No se pudo hacer TRUNCATE en " + pgTable + " (¿Aún no existe en el esquema?). Saltando.");
+            try { pgConn.rollback(); } catch (SQLException ex) {}
             return false;
         }
     }
 
-    /**
-     * Extrae los datos de una tabla en MySQL y los inserta por lotes en PostgreSQL.
-     */
     private static void migrateTableData(Connection myConn, Connection pgConn, String tableName, int batchSize) throws SQLException {
         String pgTable = tableName.toLowerCase();
+
+        List<String> oidColumns = new ArrayList<>();
+        try (Statement stmt = pgConn.createStatement();
+             ResultSet rs = stmt.executeQuery("SELECT column_name, data_type FROM information_schema.columns WHERE table_name = '" + pgTable + "' AND data_type = 'oid'")) {
+            while (rs.next()) {
+                oidColumns.add(rs.getString("column_name").toLowerCase());
+            }
+        }
+
         String selectSql = "SELECT * FROM " + tableName;
 
         try (Statement myStmt = myConn.createStatement();
@@ -152,7 +200,6 @@ public class LiferayDBMigratorUtil {
             ResultSetMetaData meta = rsMy.getMetaData();
             int colCount = meta.getColumnCount();
             
-            // Construcción dinámica de la query de inserción
             StringBuilder insertSql = new StringBuilder("INSERT INTO ").append(pgTable).append(" (");
             StringBuilder placeholders = new StringBuilder("VALUES (");
             
@@ -166,16 +213,42 @@ public class LiferayDBMigratorUtil {
             }
             insertSql.append(") ").append(placeholders).append(")");
 
-            // Ejecución del Batch
+            org.postgresql.largeobject.LargeObjectManager lobjManager = null;
+            if (!oidColumns.isEmpty()) {
+                lobjManager = pgConn.unwrap(org.postgresql.PGConnection.class).getLargeObjectAPI();
+            }
+
             try (PreparedStatement pgPs = pgConn.prepareStatement(insertSql.toString())) {
                 int count = 0;
                 while (rsMy.next()) {
                     for (int i = 1; i <= colCount; i++) {
+                        String colName = meta.getColumnName(i).toLowerCase();
                         Object val = rsMy.getObject(i);
                         
-                        // Traducción específica para Liferay: MySQL TINYINT a PostgreSQL BOOLEAN
-                        if (val instanceof Integer && meta.getColumnTypeName(i).equalsIgnoreCase("TINYINT")) {
+                        if (val == null) {
+                            pgPs.setNull(i, Types.NULL);
+                            continue;
+                        }
+
+                        if (oidColumns.contains(colName)) {
+                            byte[] data;
+                            if (val instanceof String) {
+                                data = ((String) val).getBytes(java.nio.charset.StandardCharsets.UTF_8);
+                            } else if (val instanceof byte[]) {
+                                data = (byte[]) val;
+                            } else {
+                                data = val.toString().getBytes(java.nio.charset.StandardCharsets.UTF_8);
+                            }
+                            long oid = lobjManager.createLO(org.postgresql.largeobject.LargeObjectManager.READWRITE);
+                            try (org.postgresql.largeobject.LargeObject obj = lobjManager.open(oid, org.postgresql.largeobject.LargeObjectManager.WRITE)) {
+                                obj.write(data);
+                            }
+                            pgPs.setLong(i, oid);
+                        }
+                        else if (val instanceof Integer && meta.getColumnTypeName(i).equalsIgnoreCase("TINYINT")) {
                             pgPs.setBoolean(i, ((Integer) val) != 0);
+                        } else if (val instanceof Boolean) {
+                            pgPs.setBoolean(i, (Boolean) val);
                         } else {
                             pgPs.setObject(i, val);
                         }
@@ -185,17 +258,19 @@ public class LiferayDBMigratorUtil {
 
                     if (count % batchSize == 0) {
                         pgPs.executeBatch();
-                        pgConn.commit(); // Commit por cada lote completado
+                        pgConn.commit();
                     }
                 }
                 
-                // Insertar el remanente que no completó un lote exacto
                 pgPs.executeBatch();
                 pgConn.commit();
                 
                 if (count > 0) {
                     System.out.println("[OK] " + pgTable + ": " + count + " registros migrados.");
                 }
+            } catch (SQLException ex) {
+                System.err.println("  [ERROR] Fallo al insertar en la tabla " + pgTable + ": " + ex.getMessage());
+                try { pgConn.rollback(); } catch (SQLException rEx) {}
             }
         }
     }
