@@ -5,7 +5,7 @@
 
   <groupId>es.formatocd.liferay.tools</groupId>
   <artifactId>liferay-db-migrator</artifactId>
-  <version>1.0.0-SNAPSHOT</version>
+  <version>1.0.0</version>
 
   <name>Liferay DB Migrator</name>
   <description>Tool to migrate Liferay from a MySQL database to PostgreSQL</description>
