@@ -6,9 +6,12 @@ import java.sql.SQLException;
 
 public class LiferayDBMigratorMain {
 
+    private LiferayDBMigratorMain() {
+    }
+
     public static void main(String[] args) {
         System.out.println("=============================================");
-        System.out.println("   Liferay DB Migration Tool (Java 21)       ");
+        System.out.println("   Liferay DB Migration Tool                 ");
         System.out.println("=============================================\n");
 
         LiferayDBMigratorConfig config = null;

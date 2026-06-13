@@ -5,9 +5,13 @@ import java.io.IOException;
 import java.sql.*;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Locale;
 import java.util.Properties;
 
 public class LiferayDBMigratorUtil {
+
+    private LiferayDBMigratorUtil() {
+    }
 
     public static LiferayDBMigratorConfig loadConfiguration(String[] args) {
         String configFilePath = null;
@@ -54,7 +58,7 @@ public class LiferayDBMigratorUtil {
             System.out.println("[INFO] Found " + mysqlTables.size() + " tables to migrate. Starting process...\n");
 
             for (String table : mysqlTables) {
-                if (pgTables.contains(table.toLowerCase())) {
+                if (pgTables.contains(table.toLowerCase(Locale.ROOT))) {
                     if (truncateTable(pgConn, table)) {
                         migrateTableData(myConn, pgConn, table, batchSize);
                     }
@@ -107,7 +111,7 @@ public class LiferayDBMigratorUtil {
         DatabaseMetaData metaData = pgConn.getMetaData();
         try (ResultSet rs = metaData.getTables(null, "public", "%", new String[]{"TABLE"})) {
             while (rs.next()) {
-                tables.add(rs.getString("TABLE_NAME").toLowerCase());
+                tables.add(rs.getString("TABLE_NAME").toLowerCase(Locale.ROOT));
             }
         }
         return tables;
@@ -116,7 +120,7 @@ public class LiferayDBMigratorUtil {
     private static void cloneMissingTables(Connection myConn, Connection pgConn, List<String> mysqlTables, List<String> pgTables) {
         System.out.println("[INFO] Verifying and cloning missing tables in PostgreSQL...");
         for (String table : mysqlTables) {
-            String pgTable = table.toLowerCase();
+            String pgTable = table.toLowerCase(Locale.ROOT);
             if (!pgTables.contains(pgTable)) {
                 System.out.println("  Cloning structure: " + table + " -> " + pgTable + "...");
                 StringBuilder createStmt = new StringBuilder("CREATE TABLE ").append(pgTable).append(" (\n");
@@ -126,8 +130,8 @@ public class LiferayDBMigratorUtil {
                 try (Statement stmt = myConn.createStatement();
                      ResultSet rs = stmt.executeQuery("SHOW COLUMNS FROM " + table)) {
                     while (rs.next()) {
-                        String colName = rs.getString("Field").toLowerCase();
-                        String colTypeRaw = rs.getString("Type").toLowerCase();
+                        String colName = rs.getString("Field").toLowerCase(Locale.ROOT);
+                        String colTypeRaw = rs.getString("Type").toLowerCase(Locale.ROOT);
                         String key = rs.getString("Key");
 
                         String pgType = "text";
@@ -169,7 +173,7 @@ public class LiferayDBMigratorUtil {
     }
 
     private static boolean truncateTable(Connection pgConn, String tableName) {
-        String pgTable = tableName.toLowerCase();
+        String pgTable = tableName.toLowerCase(Locale.ROOT);
         try (Statement pgStmt = pgConn.createStatement()) {
             pgStmt.execute("TRUNCATE TABLE " + pgTable + " CASCADE;");
             pgConn.commit();
@@ -182,20 +186,22 @@ public class LiferayDBMigratorUtil {
     }
 
     private static void migrateTableData(Connection myConn, Connection pgConn, String tableName, int batchSize) throws SQLException {
-        String pgTable = tableName.toLowerCase();
+        String pgTable = tableName.toLowerCase(Locale.ROOT);
 
         List<String> oidColumns = new ArrayList<>();
         try (Statement stmt = pgConn.createStatement();
              ResultSet rs = stmt.executeQuery("SELECT column_name, data_type FROM information_schema.columns WHERE table_name = '" + pgTable + "' AND data_type = 'oid'")) {
             while (rs.next()) {
-                oidColumns.add(rs.getString("column_name").toLowerCase());
+                oidColumns.add(rs.getString("column_name").toLowerCase(Locale.ROOT));
             }
         }
 
         String selectSql = "SELECT * FROM " + tableName;
 
-        try (Statement myStmt = myConn.createStatement();
-             ResultSet rsMy = myStmt.executeQuery(selectSql)) {
+        try (Statement myStmt = myConn.createStatement(ResultSet.TYPE_FORWARD_ONLY, ResultSet.CONCUR_READ_ONLY)) {
+            myStmt.setFetchSize(Integer.MIN_VALUE);
+            
+            try (ResultSet rsMy = myStmt.executeQuery(selectSql)) {
 
             ResultSetMetaData meta = rsMy.getMetaData();
             int colCount = meta.getColumnCount();
@@ -204,7 +210,7 @@ public class LiferayDBMigratorUtil {
             StringBuilder placeholders = new StringBuilder("VALUES (");
             
             for (int i = 1; i <= colCount; i++) {
-                insertSql.append(meta.getColumnName(i).toLowerCase());
+                insertSql.append(meta.getColumnName(i).toLowerCase(Locale.ROOT));
                 placeholders.append("?");
                 if (i < colCount) {
                     insertSql.append(", ");
@@ -222,7 +228,7 @@ public class LiferayDBMigratorUtil {
                 int count = 0;
                 while (rsMy.next()) {
                     for (int i = 1; i <= colCount; i++) {
-                        String colName = meta.getColumnName(i).toLowerCase();
+                        String colName = meta.getColumnName(i).toLowerCase(Locale.ROOT);
                         Object val = rsMy.getObject(i);
                         
                         if (val == null) {
@@ -262,8 +268,10 @@ public class LiferayDBMigratorUtil {
                     }
                 }
                 
-                pgPs.executeBatch();
-                pgConn.commit();
+                if (count % batchSize != 0) {
+                    pgPs.executeBatch();
+                    pgConn.commit();
+                }
                 
                 if (count > 0) {
                     System.out.println("[OK] " + pgTable + ": " + count + " records migrated.");
