@@ -280,6 +280,7 @@ public class LiferayDBMigratorUtil {
                 System.err.println("  [ERROR] Failed to insert into table " + pgTable + ": " + ex.getMessage());
                 try { pgConn.rollback(); } catch (SQLException rEx) {}
             }
+            }
         }
     }
 }
