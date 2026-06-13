@@ -23,9 +23,9 @@ public class LiferayDBMigratorUtil {
         if (configFilePath != null) {
             try (FileInputStream fis = new FileInputStream(configFilePath)) {
                 props.load(fis);
-                System.out.println("[INFO] Archivo de configuración cargado desde: " + configFilePath);
+                System.out.println("[INFO] Configuration file loaded from: " + configFilePath);
             } catch (IOException e) {
-                System.err.println("[WARN] No se pudo leer el archivo especificado: " + configFilePath);
+                System.err.println("[WARN] Could not read the specified file: " + configFilePath);
             }
         }
 
@@ -51,7 +51,7 @@ public class LiferayDBMigratorUtil {
 
             disableForeignKeys(pgConn);
 
-            System.out.println("[INFO] Se encontraron " + mysqlTables.size() + " tablas para migrar. Iniciando proceso...\n");
+            System.out.println("[INFO] Found " + mysqlTables.size() + " tables to migrate. Starting process...\n");
 
             for (String table : mysqlTables) {
                 if (pgTables.contains(table.toLowerCase())) {
@@ -61,7 +61,7 @@ public class LiferayDBMigratorUtil {
                 }
             }
 
-            System.out.println("\n[EXITO] Transferencia de datos completada.");
+            System.out.println("\n[SUCCESS] Data transfer completed.");
 
         } finally {
             enableForeignKeys(pgConn);
@@ -80,14 +80,14 @@ public class LiferayDBMigratorUtil {
     private static void disableForeignKeys(Connection pgConn) throws SQLException {
         try (Statement stmt = pgConn.createStatement()) {
             stmt.execute("SET session_replication_role = 'replica';");
-            System.out.println("[INFO] Claves foráneas desactivadas temporalmente en PostgreSQL.");
+            System.out.println("[INFO] Foreign keys temporarily disabled in PostgreSQL.");
         }
     }
 
     private static void enableForeignKeys(Connection pgConn) throws SQLException {
         try (Statement stmt = pgConn.createStatement()) {
             stmt.execute("SET session_replication_role = 'origin';");
-            System.out.println("[INFO] Claves foráneas restauradas en PostgreSQL.");
+            System.out.println("[INFO] Foreign keys restored in PostgreSQL.");
         }
     }
 
@@ -114,11 +114,11 @@ public class LiferayDBMigratorUtil {
     }
 
     private static void cloneMissingTables(Connection myConn, Connection pgConn, List<String> mysqlTables, List<String> pgTables) {
-        System.out.println("[INFO] Verificando y clonando tablas faltantes en PostgreSQL...");
+        System.out.println("[INFO] Verifying and cloning missing tables in PostgreSQL...");
         for (String table : mysqlTables) {
             String pgTable = table.toLowerCase();
             if (!pgTables.contains(pgTable)) {
-                System.out.println("  Clonando estructura: " + table + " -> " + pgTable + "...");
+                System.out.println("  Cloning structure: " + table + " -> " + pgTable + "...");
                 StringBuilder createStmt = new StringBuilder("CREATE TABLE ").append(pgTable).append(" (\n");
                 List<String> colDefs = new ArrayList<>();
                 List<String> pkCols = new ArrayList<>();
@@ -147,7 +147,7 @@ public class LiferayDBMigratorUtil {
                         }
                     }
                 } catch (SQLException e) {
-                    System.err.println("  [ERROR] No se pudo leer esquema de MySQL para " + table + ": " + e.getMessage());
+                    System.err.println("  [ERROR] Could not read MySQL schema for " + table + ": " + e.getMessage());
                     continue;
                 }
 
@@ -161,7 +161,7 @@ public class LiferayDBMigratorUtil {
                     pgConn.commit();
                     pgTables.add(pgTable);
                 } catch (SQLException e) {
-                    System.err.println("  [ERROR] Fallo al crear la tabla " + pgTable + ": " + e.getMessage());
+                    System.err.println("  [ERROR] Failed to create table " + pgTable + ": " + e.getMessage());
                     try { pgConn.rollback(); } catch (SQLException ex) {}
                 }
             }
@@ -175,7 +175,7 @@ public class LiferayDBMigratorUtil {
             pgConn.commit();
             return true;
         } catch (SQLException e) {
-            System.out.println("[WARN] No se pudo hacer TRUNCATE en " + pgTable + " (¿Aún no existe en el esquema?). Saltando.");
+            System.out.println("[WARN] Could not TRUNCATE " + pgTable + " (Does it exist in the schema?). Skipping.");
             try { pgConn.rollback(); } catch (SQLException ex) {}
             return false;
         }
@@ -266,10 +266,10 @@ public class LiferayDBMigratorUtil {
                 pgConn.commit();
                 
                 if (count > 0) {
-                    System.out.println("[OK] " + pgTable + ": " + count + " registros migrados.");
+                    System.out.println("[OK] " + pgTable + ": " + count + " records migrated.");
                 }
             } catch (SQLException ex) {
-                System.err.println("  [ERROR] Fallo al insertar en la tabla " + pgTable + ": " + ex.getMessage());
+                System.err.println("  [ERROR] Failed to insert into table " + pgTable + ": " + ex.getMessage());
                 try { pgConn.rollback(); } catch (SQLException rEx) {}
             }
         }

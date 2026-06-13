@@ -11,15 +11,15 @@ public record LiferayDBMigratorConfig(
 ) {
     
         public LiferayDBMigratorConfig {
-            if (mysqlUrl == null || mysqlUrl.isBlank()) throw new IllegalArgumentException("La URL de MySQL (mysql.url) es obligatoria.");
-            if (mysqlUser == null || mysqlUser.isBlank()) throw new IllegalArgumentException("El usuario de MySQL (mysql.user) es obligatorio.");
-            if (mysqlPassword == null || mysqlPassword.isBlank()) throw new IllegalArgumentException("La contraseña de MySQL (mysql.password) es obligatoria.");
+            if (mysqlUrl == null || mysqlUrl.isBlank()) throw new IllegalArgumentException("MySQL URL (mysql.url) is required.");
+            if (mysqlUser == null || mysqlUser.isBlank()) throw new IllegalArgumentException("MySQL user (mysql.user) is required.");
+            if (mysqlPassword == null || mysqlPassword.isBlank()) throw new IllegalArgumentException("MySQL password (mysql.password) is required.");
             
-            if (postgresUrl == null || postgresUrl.isBlank()) throw new IllegalArgumentException("La URL de PostgreSQL (postgres.url) es obligatoria.");
-            if (postgresUser == null || postgresUser.isBlank()) throw new IllegalArgumentException("El usuario de PostgreSQL (postgres.user) es obligatorio.");
-            if (postgresPassword == null || postgresPassword.isBlank()) throw new IllegalArgumentException("La contraseña de PostgreSQL (postgres.password) es obligatoria.");
+            if (postgresUrl == null || postgresUrl.isBlank()) throw new IllegalArgumentException("PostgreSQL URL (postgres.url) is required.");
+            if (postgresUser == null || postgresUser.isBlank()) throw new IllegalArgumentException("PostgreSQL user (postgres.user) is required.");
+            if (postgresPassword == null || postgresPassword.isBlank()) throw new IllegalArgumentException("PostgreSQL password (postgres.password) is required.");
             
-            if (batchSize <= 0) throw new IllegalArgumentException("El tamaño del lote (batch.size) debe ser mayor que 0.");
+            if (batchSize <= 0) throw new IllegalArgumentException("Batch size (batch.size) must be greater than 0.");
         }
 
 }

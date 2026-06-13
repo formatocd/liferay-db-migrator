@@ -1,26 +1,26 @@
 @echo off
 setlocal
 
-:: Encontrar el directorio base
+:: Find base directory
 set BASEDIR=%~dp0
 
-:: Buscar Java
+:: Find Java
 if defined JAVA_HOME (
     set JAVACMD="%JAVA_HOME%\bin\java.exe"
 ) else (
     set JAVACMD="java"
 )
 
-:: Ajustes de memoria JVM
+:: JVM memory settings
 set JAVA_OPTS=-Xms2g -Xmx4g -XX:+UseZGC
 
-:: Construir el Classpath
+:: Build Classpath
 set CLASSPATH="%BASEDIR%;%BASEDIR%liferay-db-migrator.jar"
 
-echo Iniciando Liferay Database Migrator...
-echo Usando Java: %JAVACMD%
+echo Starting Liferay Database Migrator...
+echo Using Java: %JAVACMD%
 
-:: Ejecutar la aplicación
+:: Run application
 %JAVACMD% %JAVA_OPTS% -cp %CLASSPATH% es.formatocd.liferay.tools.LiferayDBMigratorMain %*
 
 endlocal
